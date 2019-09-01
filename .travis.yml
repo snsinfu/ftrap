@@ -1,0 +1,12 @@
+dist: xenial
+language: c
+
+stages:
+  - test
+
+jobs:
+  include:
+    - stage: test
+      script:
+        - make
+        - tests/run
