@@ -1,0 +1,25 @@
+#!/bin/sh
+
+testdir=$(dirname $0)
+
+alias ftrap=${testdir}/../ftrap
+
+testcase() {
+    checks=0
+    echo "TEST: $*"
+}
+
+assert() {
+    checks=$((checks + 1))
+    if test "$@"; then
+        echo "  PASS [${checks}]"
+    else
+        echo "  FAIL [${checks}] '$*'"
+        exit 1
+    fi
+}
+
+for script in ${testdir}/test_*.sh; do
+    . ${script}
+    echo ""
+done
