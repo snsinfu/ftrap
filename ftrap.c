@@ -64,8 +64,14 @@ int main(int argc, char **argv)
         return ftrap_error;
     }
 
-    // Looks like a handler needs to be set to detect SIGCHLD with signalfd.
-    if (signal(SIGCHLD, dummy_handler) == SIG_ERR) {
+    // Use SIGCHLD to detect child process' termination. We poll on a signalfd
+    // intead of using handler so that we can wait for both file changes and
+    // child process concurrently.
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = dummy_handler;
+    sa.sa_flags = SA_NOCLDSTOP;
+    if (sigaction(SIGCHLD, &sa, NULL) == -1) {
         fprintf(stderr, "error: Failed to watch SIGCHLD - %s\n", strerror(errno));
         return ftrap_error;
     }
@@ -79,6 +85,7 @@ int main(int argc, char **argv)
         return ftrap_error;
     }
 
+    // Now start the child process.
     pid = fork();
     if (pid == -1) {
         fprintf(stderr, "error: Cannot fork - %s\n", strerror(errno));
