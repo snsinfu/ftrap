@@ -2,8 +2,6 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-#define _POSIX_C_SOURCE 200112L
-
 #include <assert.h>
 #include <errno.h>
 #include <signal.h>
@@ -13,26 +11,16 @@
 
 #include <sys/inotify.h>
 #include <sys/signalfd.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
 #include <limits.h>
 #include <poll.h>
 #include <unistd.h>
 
+#include "ftrap.h"
+#include "watch_list.h"
 
-enum { ftrap_error = 112 };
-
-struct watch_list {
-    const char        *path;
-    int                wd;
-    struct watch_list *prev;
-    struct watch_list *next;
-};
-
-struct watch_list *watch_list_init(struct watch_list *node);
-struct watch_list *watch_list_insert(struct watch_list *ent, struct watch_list *node);
-struct watch_list *watch_list_drop(struct watch_list *ent);
-struct watch_list *watch_list_find(struct watch_list *list, int wd);
 
 enum {
     // inotify events to watch. The model use case of ftrap is config file
@@ -62,81 +50,14 @@ enum {
         IN_CREATE
 };
 
-void show_usage(void);
-int  ftrap_start(struct watch_list *queue, char **argv, int *status);
-int  ftrap_watch(int inofd, struct watch_list *queue, struct watch_list *active);
-
+static int  watch_some(int inofd, struct watch_list *queue, struct watch_list *active);
 static void dummy_handler(int sig);
 
 
-int main(int argc, char **argv)
-{
-    struct watch_list *targets = NULL;
-    size_t n_targets = 0;
-
-    for (int ch; (ch = getopt(argc, argv, "hf:")) != -1; ) {
-        switch (ch) {
-        case 'h':
-            show_usage();
-            return 0;
-
-        case 'f': {
-            void *new_targets = realloc(targets, (n_targets + 1) * sizeof *targets);
-            if (new_targets == NULL) {
-                fprintf(stderr, "ftrap: Failed to allocate memory - %s\n", strerror(errno));
-                return ftrap_error;
-            }
-            targets = new_targets;
-            targets[n_targets++] = (struct watch_list) { .path = optarg };
-            break;
-        }
-
-        default:
-            return ftrap_error;
-        }
-    }
-    argc -= optind;
-    argv += optind;
-
-    if (argc == 0) {
-        fprintf(stderr, "ftrap: Command is not specified. See ftrap -h for usage.\n");
-        return ftrap_error;
-    }
-
-    struct watch_list sentinel, *queue = watch_list_init(&sentinel);
-    for (size_t i = 0; i < n_targets; i++) {
-        watch_list_insert(queue, &targets[i]);
-    }
-
-    int status = 0;
-    if (ftrap_start(queue, argv, &status) == -1) {
-        return ftrap_error;
-    }
-
-    // Exit with the exact same status as that of the command.
-    if (WIFEXITED(status)) {
-        exit(WEXITSTATUS(status));
-    }
-    if (WIFSIGNALED(status)) {
-        kill(getpid(), WTERMSIG(status));
-    }
-
-    return ftrap_error;
-}
-
-// Function: ftrap_start
-//
-// Parameters:
-//   queue  - List of paths to watch.
-//   argv   - Command argv to execute.
-//   status - Pointer to variable to return exit status to.
-//
-// Returns:
-//   0 on success, or -1 on failure.
-//
 int ftrap_start(struct watch_list *queue, char **argv, int *status)
 {
-    // We use inotify to watch for file changes.
+    // We use inotify to watch for file changes. Watched files are moved from
+    // the `queue` list to the `active` list.
     int inofd;
     struct watch_list sentinel, *active = watch_list_init(&sentinel);
 
@@ -145,8 +66,9 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
         fprintf(stderr, "ftrap: Cannot start inotify - %s\n", strerror(errno));
         return -1;
     }
+    // FIXME: inofd leaks on error
 
-    if (ftrap_watch(inofd, queue, active) == -1) {
+    if (watch_some(inofd, queue, active) == -1) {
         return -1;
     }
 
@@ -172,6 +94,7 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
         fprintf(stderr, "ftrap: Failed to create signalfd - %s\n", strerror(errno));
         return -1;
     }
+    // FIXME: sigfd leaks on error
 
     // Start child process.
     pid_t pid = fork();
@@ -280,7 +203,7 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
         }
 
         // Try to rewatch unwatched paths.
-        int n_watch = ftrap_watch(inofd, queue, active);
+        int n_watch = watch_some(inofd, queue, active);
         if (n_watch == -1) {
             // Retry in the next time.
         }
@@ -295,7 +218,7 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
     assert(0);
 }
 
-// Function: ftrap_watch
+// Function: watch_some
 //
 // Start watching paths in the queue.
 //
@@ -307,7 +230,7 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
 // Returns:
 //   The number of paths newly watched, or -1 on failure.
 //
-int ftrap_watch(int inofd, struct watch_list *queue, struct watch_list *active)
+int watch_some(int inofd, struct watch_list *queue, struct watch_list *active)
 {
     int n_watch = 0;
 
@@ -334,105 +257,11 @@ int ftrap_watch(int inofd, struct watch_list *queue, struct watch_list *active)
     return n_watch;
 }
 
-// Function: watch_list_init
+// Function: dummy_handler
 //
-// Creates an empty cyclic watch list using given node as the sentinel.
+// Signal handler that does nothing.
 //
-// Parameters:
-//   node - Pointer to a watch_list node.
-//
-// Returns:
-//   Sentinel of the created empty list, i.e., the `node` argument.
-//
-struct watch_list *watch_list_init(struct watch_list *node)
-{
-    node->prev = node;
-    node->next = node;
-    return node;
-}
-
-// Function: watch_list_insert
-//
-// Inserts a node to the specified position of a watch list.
-//
-// Parameters:
-//   ent  - Node in a list where the new node is inserted before.
-//   node - New node to insert.
-//
-// Returns:
-//   The new node inserted, i.e., the `node` argument.
-//
-struct watch_list *watch_list_insert(struct watch_list *ent, struct watch_list *node)
-{
-    // Precondition:  prev -> ent
-    // Postcondition: prev -> node -> ent
-    struct watch_list *prev = ent->prev;
-    node->prev = prev;
-    node->next = ent;
-    prev->next = node;
-    ent->prev = node;
-    return node;
-}
-
-// Function: watch_list_drop
-//
-// Drops a node from a watch list.
-//
-// Parameters:
-//   ent - Node to drop.
-//
-// Returns:
-//   The node dropped, i.e., the `ent` argument.
-//
-struct watch_list *watch_list_drop(struct watch_list *ent)
-{
-    struct watch_list *prev = ent->prev;
-    struct watch_list *next = ent->next;
-    prev->next = next;
-    next->prev = prev;
-    return ent;
-}
-
-// Function: watch_list_find
-//
-// Finds a node by wd value.
-//
-// Parameters:
-//   list - Sentinel node of the list to find a node in.
-//   wd   - wd value to identify a node.
-//
-// Returns:
-//   First node having the given wd, or NULL if no such node exists.
-//
-struct watch_list *watch_list_find(struct watch_list *list, int wd)
-{
-    for (struct watch_list *ent = list->next; ent != list; ent = ent->next) {
-        if (ent->wd == wd) {
-            return ent;
-        }
-    }
-    return NULL;
-}
-
-// Function: show_usage
-//
-// Outputs program usage to stdout.
-//
-void show_usage(void)
-{
-    const char *msg =
-        "Usage: ftrap [-h] [-f FILE] COMMAND...\n"
-        "\n"
-        "Send SIGHUP to COMMAND when any one of FILEs is changed.\n"
-        "\n"
-        "Options\n"
-        "  -h       Show this help message and exit.\n"
-        "  -f FILE  Add file to watch.\n";
-    fputs(msg, stdout);
-}
-
-
-static void dummy_handler(int sig)
+void dummy_handler(int sig)
 {
     (void) sig;
 }
