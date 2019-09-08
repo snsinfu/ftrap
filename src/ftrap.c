@@ -167,6 +167,7 @@ int ftrap_init_signal(struct ftrap *ftrap)
     }
 
     ftrap->sigfd = sigfd;
+
     return 0;
 }
 
@@ -197,13 +198,14 @@ int ftrap_spawn_command(struct ftrap *ftrap, char **argv)
     }
 
     ftrap->pid = pid;
+
     return 0;
 }
 
 // Function: ftrap_mainloop
 //
 // Processes inotify events and notifies file changes to the child process. The
-// function returns when the child process exists.
+// function returns when the child process exits.
 //
 // Returns:
 //   0 if the child process exits, or -1 on error.
@@ -265,7 +267,6 @@ int ftrap_mainloop(struct ftrap *ftrap)
         if (n_watch == -1) {
             // Retry in the next time. Proceed.
         }
-
         if (n_watch > 0) {
             // Paths become watchable. This means the paths have been newly
             // created after previous poll. So send SIGHUP.
@@ -280,7 +281,7 @@ int ftrap_mainloop(struct ftrap *ftrap)
 
 // Function: ftrap_handle_inotify
 //
-// Handles an inotify event (passed by `ftrap_mainloop`). This function semds
+// Handles an inotify event (passed by `ftrap_mainloop`). This function sends
 // SIGHUP to the child process when watched paths are changed.
 //
 // Returns:
@@ -298,8 +299,8 @@ int ftrap_handle_inotify(struct ftrap *ftrap, struct inotify_event *ev)
 
     if (ev->mask & (IN_MOVE_SELF | IN_ATTRIB)) {
         if (inotify_rm_watch(ftrap->inofd, ev->wd) == -1) {
-            // The wd can already be unwatched depending on the order of the
-            // events read and processed. Ignore this error.
+            // The wd can already have been unwatched depending on the order of
+            // the events read and processed. Ignore this error.
         } else {
             should_rewatch = 1;
         }
@@ -342,7 +343,7 @@ int ftrap_send_signal(struct ftrap *ftrap)
 
 // Function: ftrap_watch_queue
 //
-// Add queued paths to the inotify instance if the paths exist.
+// Adds queued paths to the inotify instance if the paths exist.
 //
 // Returns:
 //   The number of newly watched paths, or -1 on failure.
@@ -379,7 +380,7 @@ int ftrap_watch_queue(struct ftrap *ftrap)
 
 // Function: ftrap_wait
 //
-// Wait for the child process to exit. The exit code is assigned to `*status`.
+// Waits for the child process to exit. The exit code is assigned to `*status`.
 //
 // Returns:
 //   0 on success, or -1 on failure.
