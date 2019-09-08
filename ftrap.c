@@ -197,7 +197,7 @@ int ftrap_start(struct watch_list *queue, char **argv, int *status)
         [poll_signalfd] = { .fd = sigfd, .events = POLLIN }
     };
 
-    int watch_interval_ms = 5000;
+    int watch_interval_ms = 3000;
 
     for (;;) {
         if (poll(polls, poll_count, watch_interval_ms) == -1) {
