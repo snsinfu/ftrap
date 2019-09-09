@@ -62,6 +62,7 @@ struct ftrap {
     struct watch_list *queue;
     struct watch_list *active;
     int                interval;
+    int                signal;
 };
 
 static int  ftrap_init_inotify(struct ftrap *ftrap);
@@ -76,13 +77,14 @@ static void ftrap_close(struct ftrap *ftrap);
 static void dummy_handler(int sig);
 
 
-int ftrap_start(struct watch_list *queue, char **argv, int *status)
+int ftrap_start(struct watch_list *queue, int sig, char **argv, int *status)
 {
     struct ftrap ftrap = {
         .inofd    = -1,
         .sigfd    = -1,
         .pid      = -1,
-        .interval = watch_interval
+        .interval = watch_interval,
+        .signal   = sig
     };
 
     struct watch_list sentinel;
@@ -269,7 +271,7 @@ int ftrap_mainloop(struct ftrap *ftrap)
         }
         if (n_watch > 0) {
             // Paths become watchable. This means the paths have been newly
-            // created after previous poll. So send SIGHUP.
+            // created after previous poll. So send a signal.
             if (ftrap_send_signal(ftrap) == -1) {
                 // Proceed anyway.
             }
@@ -282,7 +284,7 @@ int ftrap_mainloop(struct ftrap *ftrap)
 // Function: ftrap_handle_inotify
 //
 // Handles an inotify event (passed by `ftrap_mainloop`). This function sends
-// SIGHUP to the child process when watched paths are changed.
+// a signal to the child process when watched paths are changed.
 //
 // Returns:
 //   0 on success, or -1 on failure.
@@ -327,15 +329,15 @@ int ftrap_handle_inotify(struct ftrap *ftrap, struct inotify_event *ev)
 
 // Function: ftrap_send_signal
 //
-// Sends SIGHUP to the child process.
+// Sends notification signal to the child process.
 //
 // Returns:
 //   0 on success, or -1 on failure.
 //
 int ftrap_send_signal(struct ftrap *ftrap)
 {
-    if (kill(ftrap->pid, SIGHUP) == -1) {
-        fprintf(stderr, "ftrap: Failed to send SIGHUP - %s\n", strerror(errno));
+    if (kill(ftrap->pid, ftrap->signal) == -1) {
+        fprintf(stderr, "ftrap: Failed to send signal - %s\n", strerror(errno));
         return -1;
     }
     return 0;

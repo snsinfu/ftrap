@@ -12,12 +12,13 @@
 //
 // Parameters:
 //   queue  - List of paths to watch.
+//   sig    - Signal to send to the child process.
 //   argv   - Command argv to execute.
 //   status - Pointer to variable to return exit status to.
 //
 // Returns:
 //   0 on success, or -1 on failure.
 //
-int ftrap_start(struct watch_list *queue, char **argv, int *status);
+int ftrap_start(struct watch_list *queue, int sig, char **argv, int *status);
 
 #endif

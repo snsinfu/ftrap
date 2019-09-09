@@ -23,18 +23,9 @@ enum {
     ftrap_error = 112
 };
 
-static void show_usage(void)
-{
-    const char *msg =
-        "Usage: ftrap [-h] [-f FILE] COMMAND...\n"
-        "\n"
-        "Send SIGHUP to COMMAND when any one of FILEs is changed.\n"
-        "\n"
-        "Options\n"
-        "  -h       Show this help message and exit.\n"
-        "  -f FILE  Add file to watch.\n";
-    fputs(msg, stdout);
-}
+static int  parse_signal_name(const char *name);
+static void show_usage(void);
+
 
 int main(int argc, char **argv)
 {
@@ -42,8 +33,9 @@ int main(int argc, char **argv)
     // will then build a list from these nodes. We don't free this array.
     struct watch_list *targets = NULL;
     size_t n_targets = 0;
+    int sig = SIGHUP;
 
-    for (int ch; (ch = getopt(argc, argv, "hf:")) != -1; ) {
+    for (int ch; (ch = getopt(argc, argv, "hf:s:")) != -1; ) {
         switch (ch) {
         case 'h':
             show_usage();
@@ -59,6 +51,14 @@ int main(int argc, char **argv)
             targets[n_targets++] = (struct watch_list) { .path = optarg };
             break;
         }
+
+        case 's':
+            sig = parse_signal_name(optarg);
+            if (sig == -1) {
+                fprintf(stderr, "ftrap: Unrecognized signal name '%s'.\n", optarg);
+                return ftrap_error;
+            }
+            break;
 
         default:
             return ftrap_error;
@@ -78,7 +78,7 @@ int main(int argc, char **argv)
     }
 
     int status = 0;
-    if (ftrap_start(queue, argv, &status) == -1) {
+    if (ftrap_start(queue, sig, argv, &status) == -1) {
         return ftrap_error;
     }
 
@@ -94,4 +94,42 @@ int main(int argc, char **argv)
     }
 
     assert(0);
+}
+
+void show_usage(void)
+{
+    const char *msg =
+        "Usage: ftrap [-h] [-f FILE] [-s SIGNAL] COMMAND...\n"
+        "\n"
+        "Send signal to COMMAND when any one of FILEs is changed.\n"
+        "\n"
+        "Options\n"
+        "  -h         Show this help message and exit.\n"
+        "  -f FILE    Add file to watch.\n"
+        "  -s SIGNAL  Specify signal to send: HUP, USR1, USR2, TERM, QUIT or INT.\n"
+        "             Default is HUP.\n";
+    fputs(msg, stdout);
+}
+
+int parse_signal_name(const char *name)
+{
+    static const struct {
+        const char *name;
+        int         value;
+    } signal_options[] = {
+        { "HUP", SIGHUP },
+        { "USR1", SIGUSR1 },
+        { "USR2", SIGUSR2 },
+        { "TERM", SIGTERM },
+        { "QUIT", SIGQUIT },
+        { "INT", SIGINT }
+    };
+    enum { n_signal_options = sizeof signal_options / sizeof *signal_options };
+
+    for (size_t i = 0; i < n_signal_options; i++) {
+        if (strcmp(signal_options[i].name, name) == 0) {
+            return signal_options[i].value;
+        }
+    }
+    return -1;
 }
