@@ -68,4 +68,16 @@ struct watch_list *watch_list_drop(struct watch_list *ent);
 //
 struct watch_list *watch_list_find(struct watch_list *list, int wd);
 
+
+// Function: watch_list_nonempty
+//
+// Parameters:
+//   list - Sentinel node of a list.
+//
+// Returns:
+//   1 if the list contains at least one element, or 0 if not.
+//
+int watch_list_nonempty(struct watch_list *list);
+
+
 #endif

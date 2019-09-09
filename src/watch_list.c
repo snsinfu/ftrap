@@ -44,3 +44,8 @@ struct watch_list *watch_list_find(struct watch_list *list, int wd)
     }
     return NULL;
 }
+
+int watch_list_nonempty(struct watch_list *list)
+{
+    return list->next != list;
+}

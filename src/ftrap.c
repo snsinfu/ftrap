@@ -24,7 +24,7 @@
 
 enum {
     // Polling interval, in milliseconds, for detecting newly created files.
-    watch_interval = 3000
+    newfile_check_interval = 3000
 };
 
 enum {
@@ -61,7 +61,6 @@ struct ftrap {
     pid_t              pid;
     struct watch_list *queue;
     struct watch_list *active;
-    int                interval;
     int                signal;
 };
 
@@ -83,7 +82,6 @@ int ftrap_start(struct watch_list *queue, int sig, char **argv, int *status)
         .inofd    = -1,
         .sigfd    = -1,
         .pid      = -1,
-        .interval = watch_interval,
         .signal   = sig
     };
 
@@ -225,7 +223,11 @@ int ftrap_mainloop(struct ftrap *ftrap)
     };
 
     for (;;) {
-        while (poll(polls, poll_count, ftrap->interval) == -1) {
+        int timeout = -1;
+        if (watch_list_nonempty(ftrap->queue)) {
+            timeout = newfile_check_interval;
+        }
+        while (poll(polls, poll_count, timeout) == -1) {
             if (errno == EINTR) {
                 continue;
             }
