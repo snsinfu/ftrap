@@ -1,8 +1,12 @@
 dist: xenial
 language: c
 
+services:
+  - docker
+
 stages:
   - test
+  - deploy
 
 jobs:
   include:
@@ -10,3 +14,14 @@ jobs:
       script:
         - make
         - tests/run
+
+    - stage: deploy
+      script: docker run -v $PWD:/srv alpine /srv/alpine_build.sh
+      deploy:
+        provider: releases
+        api_key: $GITHUB_TOKEN
+        file: ftrap
+        skip_cleanup: true
+        on:
+          tags: true
+          condition: $TRAVIS_TAG =~ v[0-9].*
